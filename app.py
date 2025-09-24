@@ -4,6 +4,7 @@ import re
 from graphviz import Digraph
 from collections import deque, defaultdict
 import networkx as nx
+from PIL import Image
 
 # --- Core Logic ---
 
@@ -31,9 +32,8 @@ def parse_single_sql(sql_statement):
 
 def build_dependency_maps(pipeline_data):
     dependency_map, reverse_dependency_map = {}, {}
-    sql_by_task = {}  # Store SQL for each task
+    sql_by_task = {}  
     
-    # Process transformations from tasks array
     tasks = pipeline_data.get('tasks', [])
     for task in tasks:
         if task.get('taskType') == 'TRANSFORMATION':
@@ -55,7 +55,6 @@ def build_dependency_maps(pipeline_data):
                         for inp in inputs_cleaned:
                             reverse_dependency_map.setdefault(inp, set()).add(output_cleaned)
     
-    # Process transformations array if it exists
     transformations = pipeline_data.get('transformations', [])
     for trans in transformations:
         task_id = trans.get('id')
@@ -76,7 +75,6 @@ def build_dependency_maps(pipeline_data):
                     for inp in inputs_cleaned:
                         reverse_dependency_map.setdefault(inp, set()).add(output_cleaned)
     
-    # Process extractions
     for extr in pipeline_data.get('tableExtractions', []):
         if not extr.get('disabled'):
             table_name = (extr.get('targetTableName') or extr.get('tableName', '')).upper()
@@ -91,7 +89,6 @@ def build_dependency_maps(pipeline_data):
     return dependency_map, reverse_dependency_map, sql_by_task
 
 def find_unused_objects(dependency_map, reverse_dependency_map, final_tables):
-    """Find tables that are created but never used"""
     unused_tables = []
     orphaned_sources = []
     
@@ -110,7 +107,6 @@ def find_unused_objects(dependency_map, reverse_dependency_map, final_tables):
     return unused_tables, orphaned_sources
 
 def analyze_dependency_chains(dependency_map, reverse_dependency_map, final_tables):
-    """Analyze the depth and complexity of dependency chains"""
     chain_lengths = {}
     
     def get_chain_length(table, visited=None):
@@ -137,7 +133,6 @@ def analyze_dependency_chains(dependency_map, reverse_dependency_map, final_tabl
     return chain_lengths
 
 def search_in_pipeline(search_term, dependency_map, sql_by_task):
-    """Search for tables or SQL patterns in the pipeline"""
     results = {
         'tables': [],
         'sql_matches': []
@@ -145,12 +140,10 @@ def search_in_pipeline(search_term, dependency_map, sql_by_task):
     
     search_upper = search_term.upper()
     
-    # Search in table names
     for table in dependency_map.keys():
         if search_upper in table:
             results['tables'].append(table)
     
-    # Search in SQL statements
     for task_id, sql in sql_by_task.items():
         if search_upper in sql.upper():
             results['sql_matches'].append({
@@ -161,7 +154,6 @@ def search_in_pipeline(search_term, dependency_map, sql_by_task):
     return results
 
 def get_extraction_summary(pipeline_data, all_tasks):
-    """Summarize all extraction configurations, grouped by table"""
     extractions_by_table = defaultdict(list)
     
     for extr in pipeline_data.get('tableExtractions', []):
@@ -182,7 +174,6 @@ def get_extraction_summary(pipeline_data, all_tasks):
     return extractions_by_table
 
 def get_final_tables_and_aliases(datamodel_data):
-    """Extract final tables and aliases from data model"""
     final_tables, alias_map = set(), {}
     for model in datamodel_data.get('dataModels', []):
         for table in model.get('tables', []):
@@ -229,57 +220,61 @@ def trace_lineage(start_nodes, dep_map, reverse_dep_map, direction='upstream', d
     
     return nodes_to_render, edges_to_render
 
-def generate_graph_data(nodes, edges, pipeline_data, final_tables, alias_map, title, output_format='png', preview=False):
+def generate_graph_data(nodes, edges, pipeline_data, final_tables, alias_map, title, output_format='pdf'):
     if not nodes:
+        st.warning("No nodes available to generate the graph.")
         return None
     
-    dot = Digraph(engine='dot')
-    dpi = '96' if preview else '300'
-    dot.attr(rankdir='LR', splines='ortho', nodesep='0.6', ranksep='1.5', 
-             label=title, labelloc='t', fontsize='24', fontname="Helvetica", dpi=dpi)
-    
-    styles = {
-        "final_table": {'shape': 'folder', 'style': 'filled', 'fillcolor': '#D5E8D4', 'color': '#82b366'},
-        "intermediate_table": {'shape': 'folder', 'style': 'filled', 'fillcolor': '#DAE8FC'},
-        "task": {'shape': 'ellipse', 'style': 'filled', 'fillcolor': '#FFF2CC'},
-        "source_system": {'shape': 'cylinder', 'style': 'filled', 'fillcolor': '#F8CECC'}
-    }
-    
-    # Get all tasks
-    all_tasks = {}
-    for t in pipeline_data.get('tasks', []):
-        if 'id' in t:
-            all_tasks[t['id']] = t
-    for t in pipeline_data.get('transformations', []):
-        if 'id' in t:
-            all_tasks[t['id']] = t
-    
-    for node_id in nodes:
-        node_id_str = str(node_id)
-        if node_id == 'SAP_SOURCE':
-            dot.node(node_id_str, 'SAP Source System', **styles['source_system'])
-        elif node_id in all_tasks:
-            task_name = all_tasks[node_id].get('name', 'Unnamed Task')
-            dot.node(node_id_str, f"Task: {task_name}", **styles['task'])
-        else:
-            if node_id in final_tables or node_id in alias_map.values():
-                dot.node(node_id_str, node_id_str, **styles['final_table'])
+    try:
+        dot = Digraph(engine='dot')
+        dot.attr(rankdir='LR', splines='ortho', nodesep='0.5', ranksep='1.0', 
+                 label=title, labelloc='t', fontsize='24', fontname="Helvetica", dpi='300')
+        
+        styles = {
+            "final_table": {'shape': 'folder', 'style': 'filled', 'fillcolor': '#D5E8D4', 'color': '#82b366'},
+            "intermediate_table": {'shape': 'folder', 'style': 'filled', 'fillcolor': '#DAE8FC'},
+            "task": {'shape': 'ellipse', 'style': 'filled', 'fillcolor': '#FFF2CC'},
+            "source_system": {'shape': 'cylinder', 'style': 'filled', 'fillcolor': '#F8CECC'}
+        }
+        
+        all_tasks = {}
+        for t in pipeline_data.get('tasks', []):
+            if 'id' in t:
+                all_tasks[t['id']] = t
+        for t in pipeline_data.get('transformations', []):
+            if 'id' in t:
+                all_tasks[t['id']] = t
+        
+        for node_id in nodes:
+            node_id_str = str(node_id)
+            if node_id == 'SAP_SOURCE':
+                dot.node(node_id_str, 'SAP Source System', **styles['source_system'])
+            elif node_id in all_tasks:
+                task_name = all_tasks[node_id].get('name', 'Unnamed Task')
+                dot.node(node_id_str, f"Task: {task_name}", **styles['task'])
             else:
-                dot.node(node_id_str, node_id_str, **styles['intermediate_table'])
-    
-    for source, target in edges:
-        dot.edge(str(source), str(target))
-    
-    return dot.pipe(format=output_format)
+                if node_id in final_tables or node_id in alias_map.values():
+                    dot.node(node_id_str, node_id_str, **styles['final_table'])
+                else:
+                    dot.node(node_id_str, node_id_str, **styles['intermediate_table'])
+        
+        for source, target in edges:
+            dot.edge(str(source), str(target))
+        
+        return dot.pipe(format=output_format)
+    except Exception as e:
+        st.error(f"Error generating graph: {str(e)}")
+        return None
 
-def display_graph_preview_and_download(nodes, edges, pipeline_data, final_tables, alias_map, title):
+def offer_graph_download(nodes, edges, pipeline_data, final_tables, alias_map, title):
     st.subheader(title)
-    with st.spinner("Generating graph..."):
-        preview_png = generate_graph_data(nodes, edges, pipeline_data, final_tables, alias_map, title, output_format='png', preview=True)
-        if preview_png:
-            st.image(preview_png)
-            st.markdown("---")
-            pdf_data = generate_graph_data(nodes, edges, pipeline_data, final_tables, alias_map, title, output_format='pdf', preview=False)
+    
+    st.write(f"Number of nodes: {len(nodes)}")
+    st.write(f"Number of edges: {len(edges)}")
+    
+    with st.spinner("Generating PDF..."):
+        pdf_data = generate_graph_data(nodes, edges, pipeline_data, final_tables, alias_map, title, output_format='pdf')
+        if pdf_data:
             st.download_button(
                 label="Download as High-Quality PDF",
                 data=pdf_data,
@@ -289,6 +284,42 @@ def display_graph_preview_and_download(nodes, edges, pipeline_data, final_tables
             )
         else:
             st.warning("No data available to generate a graph for this selection.")
+
+def display_graph_preview_and_download(nodes, edges, pipeline_data, final_tables, alias_map, title):
+    st.subheader(title)
+    st.write(f"Number of nodes: {len(nodes)}")
+    st.write(f"Number of edges: {len(edges)}")
+    with st.spinner("Generating graph..."):
+        try:
+            Image.MAX_IMAGE_PIXELS = 500000000
+            preview_png = generate_graph_data(nodes, edges, pipeline_data, final_tables, alias_map, title, output_format='png')
+            if preview_png:
+                st.image(preview_png)
+                st.markdown("---")
+            pdf_data = generate_graph_data(nodes, edges, pipeline_data, final_tables, alias_map, title, output_format='pdf')
+            if pdf_data:
+                st.download_button(
+                    label="Download as High-Quality PDF",
+                    data=pdf_data,
+                    file_name=f"{title.replace(' ', '_').lower()}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            else:
+                st.error("Failed to generate PDF for download.")
+        except Image.DecompressionBombError:
+            st.error("The generated graph is too large to display as an image. Downloading the PDF version instead.")
+            pdf_data = generate_graph_data(nodes, edges, pipeline_data, final_tables, alias_map, title, output_format='pdf')
+            if pdf_data:
+                st.download_button(
+                    label="Download as High-Quality PDF",
+                    data=pdf_data,
+                    file_name=f"{title.replace(' ', '_').lower()}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+        except Exception as e:
+            st.error(f"Error displaying graph: {str(e)}")
 
 # --- Streamlit App Main Function ---
 def main():
@@ -310,7 +341,6 @@ def main():
         dependency_map, reverse_dependency_map, sql_by_task = build_dependency_maps(pipeline_data)
         final_tables, alias_map = get_final_tables_and_aliases(datamodel_data)
         
-        # Build full pipeline graph
         Full_G = nx.DiGraph()
         for child, sources in dependency_map.items():
             for info in sources:
@@ -318,9 +348,9 @@ def main():
                 for parent in info['inputs']:
                     Full_G.add_edge(parent, task)
                 Full_G.add_edge(task, child)
+        global components
         components = [c for c in sorted(nx.weakly_connected_components(Full_G), key=len, reverse=True)]
         
-        # Get all tasks for reference
         all_tasks = {}
         for t in pipeline_data.get('tasks', []):
             if 'id' in t:
@@ -333,7 +363,6 @@ def main():
         st.error(f"Error processing uploaded files: {e}")
         return
 
-    # Create tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Lineage Explorer",
         "Pipeline Explorer",
@@ -344,9 +373,7 @@ def main():
 
     with tab1:
         st.header("Lineage Explorer")
-        
         all_tables = sorted(list(dependency_map.keys() | reverse_dependency_map.keys()))
-        
         col1, col2 = st.columns(2)
         with col1:
             selected_table = st.selectbox("Select a table to trace:", all_tables)
@@ -364,22 +391,29 @@ def main():
         st.header("Pipeline Explorer")
         st.markdown("View the entire pipeline graph or inspect its individual disconnected components.")
         
-        component_options = {"Show Full Graph": Full_G.nodes()}
-        for i, c in enumerate(components):
-            component_options[f"Subgraph {i+1} ({len(c)} nodes)"] = c
+        st.write(f"Full graph nodes: {len(Full_G.nodes())}")
+        st.write(f"Full graph edges: {len(Full_G.edges())}")
         
-        selected_option_name = st.selectbox("Select a view:", component_options.keys())
-        
-        if st.button("Generate Pipeline View", use_container_width=True):
-            selected_nodes = component_options[selected_option_name]
+        # Full graph section
+        st.subheader("Full Pipeline Graph")
+        if st.button("Generate Full Graph View", use_container_width=True):
+            selected_nodes = list(Full_G.nodes())
             subgraph = Full_G.subgraph(selected_nodes)
-            title = selected_option_name
-            display_graph_preview_and_download(subgraph.nodes(), subgraph.edges(), pipeline_data, final_tables, alias_map, title)
+            title = "Full Pipeline Graph"
+            offer_graph_download(subgraph.nodes(), subgraph.edges(), pipeline_data, final_tables, alias_map, title)
+        
+        # Individual subgraphs
+        st.subheader("Individual Subgraphs")
+        for i, component in enumerate(components):
+            st.markdown(f"**Subgraph {i+1} ({len(component)} nodes)**")
+            if st.button(f"Generate Subgraph {i+1} View", key=f"subgraph_{i}", use_container_width=True):
+                selected_nodes = list(component)
+                subgraph = Full_G.subgraph(selected_nodes)
+                title = f"Subgraph {i+1}"
+                display_graph_preview_and_download(subgraph.nodes(), subgraph.edges(), pipeline_data, final_tables, alias_map, title)
 
     with tab3:
         st.header("Pipeline Analysis")
-        
-        # Dependency Chain Analysis
         st.subheader("Dependency Chain Analysis")
         chain_lengths = analyze_dependency_chains(dependency_map, reverse_dependency_map, final_tables)
         
@@ -404,7 +438,6 @@ def main():
         
         st.markdown("---")
         
-        # Unused Objects Detection
         st.subheader("Unused Objects (Can be removed)")
         unused_tables, orphaned_sources = find_unused_objects(dependency_map, reverse_dependency_map, final_tables)
         
@@ -425,7 +458,6 @@ def main():
         
         st.markdown("---")
         
-        # Convergence Points
         st.subheader("Convergence Points")
         convergence_points = {table: sources for table, sources in dependency_map.items() if len(sources) > 1}
         
@@ -445,8 +477,6 @@ def main():
 
     with tab4:
         st.header("Search & SQL Viewer")
-        
-        # Search functionality
         search_term = st.text_input("Search for table names or SQL patterns:")
         if search_term:
             results = search_in_pipeline(search_term, dependency_map, sql_by_task)
@@ -472,9 +502,7 @@ def main():
         
         st.markdown("---")
         
-        # SQL Viewer
         st.subheader("SQL Statement Viewer")
-        
         if sql_by_task:
             task_options = {}
             for task_id, sql in sql_by_task.items():
@@ -498,10 +526,8 @@ def main():
 
     with tab5:
         st.header("Extraction Summary")
-        
         extractions_by_table = get_extraction_summary(pipeline_data, all_tasks)
         
-        # Summary metrics
         col1, col2, col3 = st.columns(3)
         with col1:
             total_extractions = sum(len(extrs) for extrs in extractions_by_table.values())
@@ -513,18 +539,15 @@ def main():
             delta_count = sum(1 for extrs in extractions_by_table.values() for extr in extrs if extr['mode'] == 'DELTA')
             st.metric("Delta Loads", delta_count)
         
-        # Filter options
         col1, col2 = st.columns(2)
         with col1:
             show_disabled = st.checkbox("Show disabled extractions", value=False)
         with col2:
             filter_mode = st.radio("Filter by mode:", ["All", "DELTA", "FULL"], horizontal=True)
         
-        # Display extractions grouped by table
         st.subheader("Extraction Details by Table")
         for table_name in sorted(extractions_by_table.keys()):
             extrs = extractions_by_table[table_name]
-            # Apply filters
             filtered_extrs = [
                 extr for extr in extrs
                 if (show_disabled or not extr['disabled']) and (filter_mode == "All" or extr['mode'] == filter_mode)
@@ -536,14 +559,11 @@ def main():
                     st.write(f"- Task: {extr['task_name']}")
                     st.write(f"  Status: {'Disabled' if extr['disabled'] else 'Enabled'}")
                     st.write(f"  Mode: {extr['mode']}")
-                    
                     if extr['filter']:
                         st.write("  Filter:")
                         st.code(extr['filter'], language='sql')
-                    
                     if extr['change_date_column']:
                         st.write(f"  Change Column: {extr['change_date_column']}")
-                    
                     st.markdown("---")
 
 if __name__ == '__main__':
